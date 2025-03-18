@@ -1,45 +1,68 @@
+# main.py
 import pandas as pd
 import torch
 import train
 import predict
 import os
 from utils import visualize_routes
+from management import ManagementModule
+from environment import Environment
+from model import GRUEncoder, MultiAgentGRUDecoder
+import glob
 
-# 讀取 CSV 數據
-csv_path = 'Data/daily_data/0301.csv'  # 請替換為實際的 CSV 路徑
+# **讀取 CSV 數據**
+csv_path = 'Data/daily_data/0301.csv'
 df = pd.read_csv(csv_path, encoding='utf-8')
-file_name = os.path.basename(csv_path)
-date_str = os.path.splitext(file_name)[0]
-X_min, X_max = df["X"].min(), df["X"].max()
-Y_min, Y_max = df["Y"].min(), df["Y"].max()
-df["X"] = (df["X"] - X_min) / (X_max - X_min)
-df["Y"] = (df["Y"] - Y_min) / (Y_max - Y_min)
-# 取得當天的車輛數量
-num_agents = df['N_V'].max()  # 取最大值作為車輛數量
+num_agents = df['N_V'].max()
 print(f"今日車輛數量: {num_agents}")
 
-# 設定 GRU 參數
-input_size = 3  # (X, Y, Service_time)
-hidden_size = 50
-output_size = 2  # (預測下一個配送點的 X, Y)
-seq_length = 20
+num_stations = len(df)
+input_size = 6  
+hidden_size = num_agents * 16
+output_size = num_stations
 batch_size = 16
+epochs = 100
 
-# 生成模擬數據
-train_x = torch.randn(batch_size, seq_length, input_size)  # 模擬歷史軌跡
-train_y = torch.randn(batch_size, output_size)  # 預測下一個配送點
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Device: {device}")
 
-# 訓練模型並存檔
-encoder, strategy_module = train.train_model(train_x, train_y, input_size, hidden_size, output_size, epochs=100, lr=0.001)
+# test data from csv
+test_x = df[['X', 'Y', 'W_S', 'W_F', 'Demand', 'Service_time']].values.reshape(-1, num_stations, input_size)
+test_x = torch.tensor(test_x, dtype=torch.float32).to(device)
+print('test_x', test_x)
+# initialize environment and model
+environment = Environment(df, num_agents)
 
-# 預測每日最佳路徑並存檔
-predict.run_prediction(csv_path)
+print('Start training')
+train.train_model(
+    test_x, test_x, 
+    input_size, hidden_size, num_heads=num_agents, 
+    epochs=epochs, lr=0.01,
+    save_path='save_models/',
+    environment=environment
+)
 
-# 繪製路線圖
-csv_files = [
-    "Output/route_0301_1.csv",
-    "Output/route_0301_2.csv",
-    "Output/route_0301_3.csv"
-]
+# load trained model
+encoder, decoder = predict.load_models(input_size, hidden_size, output_size, num_agents)
 
-visualize_routes(csv_files, save_dir="Output/", date_str=date_str)
+# predict and generate routes csv
+csv_paths, output_folder = predict.generate_routes(encoder, decoder, test_x, csv_path)
+
+# csv_files = glob.glob('Output/0301/*.csv')
+# print(f"🔍 找到 {len(csv_files)} 個 CSV 檔案: {csv_files}")
+visualize_routes(csv_paths, output_folder, '0301')
+print("路線已儲存")
+
+
+# # **測試時不需要梯度計算**
+# with torch.no_grad():
+#     initial_state = torch.randn(batch_size, num_stations, input_size).to(device)
+#     total_reward = management_module.run_episode(initial_state, environment, training=False)
+#     print(f"Total Reward: {total_reward}")
+
+# # **執行多次測試 episode**
+# for episode in range(epochs):
+#     with torch.no_grad():
+#         initial_state = torch.randn(batch_size, num_stations, input_size).to(device)
+#         total_reward = management_module.run_episode(initial_state, environment, training=False)
+#         print(f"Episode {episode + 1}, Total Reward: {total_reward}")

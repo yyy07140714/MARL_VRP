@@ -1,7 +1,10 @@
-#utils.py 不是很重要的物件
+#utils.py
 import matplotlib.pyplot as plt
 import pandas as pd
 import os
+from torchsummary import summary
+
+
 # 視覺化站點及座標
 def plot_vrp(df):
     plt.figure(figsize=(8, 6))
@@ -61,3 +64,18 @@ def visualize_routes(csv_paths, save_dir, date_str):
     plt.savefig(image_path)
     plt.close()
     print(f"✅ 配送路徑圖已儲存至 {image_path}")
+
+
+def print_model_summary(encoder, strategy_module, decoder, input_size):
+    print("Encoder Summary:")
+    summary(encoder, input_size=input_size)
+
+    print("\nStrategy Module Summary:")
+    summary(strategy_module, input_size=(encoder.output_dim,))
+
+    print("\nDecoder Summary:")
+    # Use decoder's hidden_size or output_size if available, otherwise use input_size
+    decoder_input_size = getattr(decoder, 'hidden_size', 
+                               getattr(decoder, 'output_size', 
+                                     input_size[-1]))
+    summary(decoder, input_size=(decoder_input_size * 2,))
