@@ -7,6 +7,7 @@ from model import GRUEncoder, MultiAgentGRUDecoder
 from management import ManagementModule
 from tqdm import tqdm
 import numpy as np
+import gc
 
 def train_model(train_x, train_y, input_size, hidden_size, num_heads, epochs=10, lr=0.001, save_path="save_models/", environment=None):
     if environment is None:
@@ -43,13 +44,13 @@ def train_model(train_x, train_y, input_size, hidden_size, num_heads, epochs=10,
                 ])
 
             initial_state = torch.tensor(initial_state, dtype=torch.float32).unsqueeze(0).to(train_x.device)
-            print(f"[DEBUG] initial_state shape: {initial_state.shape}")
+            # print(f"[DEBUG] initial_state shape: {initial_state.shape}")
 
             # **執行 episode 訓練**
-            total_reward = management_module.run_episode(initial_state, environment, training=True)
-
+            state_loss, total_reward = management_module.run_episode(initial_state, environment, training=True)
+            print('state_loss',state_loss)
             # **梯度更新**
-            loss = -torch.tensor(total_reward, dtype=torch.float32, requires_grad=True).to(train_x.device)  # 反向優化
+            loss = -state_loss
             loss.backward()
             optimizer.step()
 
@@ -57,7 +58,8 @@ def train_model(train_x, train_y, input_size, hidden_size, num_heads, epochs=10,
 
         print(f"Epoch [{epoch+1}/{epochs}], Total Reward: {total_reward:.4f}")
         progress_bar.set_postfix({"Epoch Reward": f"{total_reward:.4f}"})
-
+        gc.collect()
+        torch.cuda.empty_cache()
     print('訓練完成！')
 
     torch.save(encoder.state_dict(), os.path.join(save_path, "encoder.pth"))

@@ -16,9 +16,9 @@ class ManagementModule:
         environment.reset()
         state = initial_state
         total_reward = 0
-        
-        start_index = 0
-        environment.visited_customers.add(start_index)
+        state_loss = 0
+        routes = [[] for _ in range(environment.num_vehicles)]  # 記錄每輛車的路徑
+        arrival_times = [[] for _ in range(environment.num_vehicles)]  # 記錄到達時間
 
         store_progress = tqdm(total=len(environment.df), desc="📍 店家分配進度", unit="店")
         print(f"[DEBUG] is_done: {environment.is_done(state)}, 已訪問: {len(environment.visited_customers)}/{len(environment.df)-1}")
@@ -27,38 +27,52 @@ class ManagementModule:
             encoded_state = self.encoder(state)
             current_num_agents = len(environment.vehicle_positions)
             decoder_input = encoded_state.unsqueeze(1).repeat(1, current_num_agents, 1)
-            agent_outputs = self.decoder(encoded_state, decoder_input, current_num_agents)
+            # 取所有配送點座標（包含 DC 的話就不用 iloc[1:]）
+            customer_positions = torch.tensor(environment.df[['X', 'Y']].values, dtype=torch.float32).to(encoded_state.device)
 
-            # 避免選擇已訪問的站點
+            agent_outputs = self.decoder(
+                encoder_output=encoded_state,
+                agent_inputs=decoder_input,
+                current_num_agents=current_num_agents,
+                customer_positions=customer_positions
+            )
+
+            # agent_outputs = self.decoder(encoded_state, decoder_input, current_num_agents)
+
             valid_outputs = agent_outputs.clone()
             for i, visited_idx in enumerate(environment.visited_customers):
                 valid_outputs[:, :, visited_idx] = float('-inf')
 
             selected_indices = torch.argmax(valid_outputs, dim=-1).cpu().numpy()
-
             new_positions = []
-            for agent_id, selected_idx in enumerate(selected_indices[0]):  # 取 batch 內的第一個
+
+            for agent_id, selected_idx in enumerate(selected_indices[0]):
                 selected_station = environment.df.iloc[selected_idx]
                 station_x, station_y = selected_station["X"], selected_station["Y"]
                 print(f"[INFO] 車輛 {agent_id} 選擇站點: {selected_station['Name']} ({station_x}, {station_y})")
                 new_positions.append([station_x, station_y])
 
-            # ✅ 更新狀態並計算獎勵
-            state, reward = environment.update_state(state, new_positions)
-            total_reward += reward  
+                # 記錄行駛路徑與到達時間
+                routes[agent_id].append((station_x, station_y))
+                arrival_times[agent_id].append(environment.get_arrival_time([station_x, station_y], agent_id))
+
+            state, reward, visited_indices = environment.update_state(state, new_positions)
+            total_reward += reward
+            state_loss += torch.mean(valid_outputs)
 
             store_progress.update(1)
 
         store_progress.close()
-        return total_reward
+
+        # **計算最終總成本**
+        total_cost = environment.calculate_total_cost(routes, arrival_times, visited_indices)
+        final_reward = total_reward - total_cost  # 將總成本從獎勵中扣除
+
+        print(f"[INFO] 總獎勵: {total_reward:.2f}, 總成本: {total_cost:.2f}, 最終獎勵: {final_reward:.2f}")
+
+        return state_loss, final_reward  # 調整為最終獎勵
 
     def reset(self):
-        self.environment.visited_customers = set()  # ✅ 清空已訪問店家
-        self.environment.vehicle_positions = [[0, 0] for _ in range(self.environment.num_vehicles)]  # ✅ 重置車輛位置
-
-
-
-
-
-
+        self.environment.visited_customers = set()  
+        self.environment.vehicle_positions = [[0, 0] for _ in range(self.environment.num_vehicles)]  
 

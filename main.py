@@ -10,49 +10,53 @@ from environment import Environment
 from model import GRUEncoder, MultiAgentGRUDecoder
 import glob
 
-# **讀取 CSV 數據**
-csv_path = 'Data/daily_data/0301.csv'
-df = pd.read_csv(csv_path, encoding='utf-8')
-num_agents = df['N_V'].max()
-print(f"今日車輛數量: {num_agents}")
+csv_files = glob.glob('Data/district_data/*.csv')
+print(f"找到 {len(csv_files)} 個 CSV 檔案：{csv_files}")
 
-num_stations = len(df)
 input_size = 6  
-hidden_size = num_agents * 16
-output_size = num_stations
 batch_size = 16
 epochs = 100
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
-# test data from csv
-test_x = df[['X', 'Y', 'W_S', 'W_F', 'Demand', 'Service_time']].values.reshape(-1, num_stations, input_size)
-test_x = torch.tensor(test_x, dtype=torch.float32).to(device)
-print('test_x', test_x)
-# initialize environment and model
-environment = Environment(df, num_agents)
+# **依序處理每個 CSV**
+for csv_path in csv_files:
+    print(f"🚀 開始處理 {csv_path}...")
 
-print('Start training')
-train.train_model(
-    test_x, test_x, 
-    input_size, hidden_size, num_heads=num_agents, 
-    epochs=epochs, lr=0.01,
-    save_path='save_models/',
-    environment=environment
-)
+    # 讀取 CSV
+    df = pd.read_csv(csv_path, encoding='utf-8')
+    num_agents = df['N_V'].max()
+    num_stations = len(df)
+    hidden_size = num_agents * 16
+    output_size = num_stations
 
-# load trained model
-encoder, decoder = predict.load_models(input_size, hidden_size, output_size, num_agents)
+    # **將數據轉換為 Tensor**
+    test_x = df[['X', 'Y', 'W_S', 'W_F', 'Demand', 'Service_time']].values.reshape(-1, num_stations, input_size)
+    test_x = torch.tensor(test_x, dtype=torch.float32).to(device)
 
-# predict and generate routes csv
-csv_paths, output_folder = predict.generate_routes(encoder, decoder, test_x, csv_path)
+    # 初始化環境
+    environment = Environment(df, num_agents)
 
-# csv_files = glob.glob('Output/0301/*.csv')
-# print(f"🔍 找到 {len(csv_files)} 個 CSV 檔案: {csv_files}")
-visualize_routes(csv_paths, output_folder, '0301')
-print("路線已儲存")
+    print(f"🚀 開始訓練 {csv_path}...")
+    train.train_model(
+        test_x, test_x, 
+        input_size, hidden_size, num_heads=num_agents, 
+        epochs=epochs, lr=0.01,
+        save_path='save_models/',
+        environment=environment
+    )
 
+    # **載入訓練好的模型**
+    encoder, decoder = predict.load_models(input_size, hidden_size, output_size, num_agents)
+
+    # **執行預測，產生配送路線**
+    csv_paths, output_folder = predict.generate_routes(encoder, decoder, test_x, csv_path)
+
+    # **視覺化結果**
+    visualize_routes(csv_paths, output_folder, os.path.basename(csv_path).split('.')[0])
+    print(f"✅ {csv_path} 的路線已儲存\n")
+
+print('Done')
 
 # # **測試時不需要梯度計算**
 # with torch.no_grad():
