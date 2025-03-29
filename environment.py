@@ -1,6 +1,7 @@
 # environment.py
 import numpy as np
 import torch
+from sklearn.cluster import KMeans
 
 class Environment:
     def __init__(self, df, num_vehicles):
@@ -12,7 +13,22 @@ class Environment:
         self.visited_customers = set()
         self.vehicles_completed = set()
         self.num_vehicles = num_vehicles
+        self.cluster_customers()
         self.reset()
+
+    def cluster_customers(self):
+        """
+        使用 KMeans 對顧客分群（不包含倉庫）
+        """
+        customer_df = self.df.iloc[1:]  # 排除 DC
+        coords = customer_df[["X", "Y"]].values
+
+        kmeans = KMeans(n_clusters=self.num_vehicles, random_state=42)
+        labels = kmeans.fit_predict(coords)
+
+        # 將 cluster_id 加回原始 df
+        self.df.loc[1:, "cluster_id"] = labels
+        self.df.loc[0, "cluster_id"] = -1  # DC 為 -1，不屬於任何群
 
     def reset(self):
         self.visited_customers = set()  # 清空已訪問
@@ -20,67 +36,78 @@ class Environment:
         self.current_time = 0
         # print(f"[DEBUG] 重置車輛位置: {self.vehicle_positions}")
 
+
     def calculate_route_length(self, route):
         """
-        計算單輛車的總行駛距離
+        計算單輛車的總行駛距離（自動加入起點和終點）
         """
+        if not route:
+            return 0
+
+        full_route = [(self.start_x, self.start_y)] + route + [(self.start_x, self.start_y)]
         total_distance = 0
-        for i in range(len(route) - 1):
-            x1, y1 = route[i]
-            x2, y2 = route[i + 1]
+        for i in range(len(full_route) - 1):
+            x1, y1 = full_route[i]
+            x2, y2 = full_route[i + 1]
             total_distance += np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
         return total_distance
 
-    def calculate_time_window_penalty(self, arrival_times, customers, alpha=0.5, beta=2):
+
+    def calculate_time_window_penalty(self, arrival_times, customers, alpha=0.5, beta=2.0): #_3
         """
-        計算時間窗違反懲罰
+        計算時間窗違反罰款（提早 & 遲到）
         """
         total_penalty = 0
         for i, customer in enumerate(customers):
-            # print(f"[DEBUG] customer: {i}")
-            # print(f"[DEBUG] arrival_times: {arrival_times}")
-            e_j, l_j = customer["W_S"], customer["W_F"]
             t_ij = arrival_times[i]
+            e_j, l_j = customer["W_S"], customer["W_F"]
 
             early_penalty = max(0, e_j - t_ij) * alpha
             late_penalty = max(0, t_ij - l_j) * beta
             total_penalty += early_penalty + late_penalty
+
         return total_penalty
 
-    def calculate_total_cost(self, routes, arrival_times, visited_indices):
+
+    def calculate_total_cost(self, routes, arrival_times, visited_indices, alpha=0.5, beta=2.0):
         """
-        計算總成本 (路徑長度 + 時間窗違反懲罰)
+        計算總成本：包含路徑距離 + 時間窗違反懲罰（提早 / 遲到），並標準化（除以客戶數）
         """
         total_cost = 0
+        total_customers = 0  # 用來標準化
+
         for vehicle_id, route in enumerate(routes):
-            if len(route) > 1:  # 確保有訪問客戶
-                total_cost += self.calculate_route_length(route)
+            route_distance = self.calculate_route_length(route)
+            total_cost += route_distance
 
-                # **只取該車輛實際訪問的站點**
-                visited_customers = [self.df.iloc[j] for j in visited_indices[vehicle_id]]
-                visited_customers_dict = [cust.to_dict() for cust in visited_customers]
+            visited_customers = [self.df.iloc[j] for j in visited_indices[vehicle_id]]
+            visited_customers_dict = [cust.to_dict() for cust in visited_customers]
+            arrival_time_list = arrival_times[vehicle_id]
 
-                print(f"[DEBUG] 車輛 {vehicle_id} 訪問的站點數: {len(visited_customers_dict)}, arrival_times 長度: {len(arrival_times[vehicle_id])}")
+            penalty = self.calculate_time_window_penalty(
+                arrival_time_list, visited_customers_dict, alpha=alpha, beta=beta
+            )
+            total_cost += penalty
 
-                total_cost += self.calculate_time_window_penalty(arrival_times[vehicle_id], visited_customers_dict)
+            total_customers += len(visited_customers_dict)
 
-        return total_cost
+            # print(f"[INFO] 車輛 {vehicle_id} 路徑距離: {route_distance:.2f}，時間窗罰款: {penalty:.2f}")
+
+        # 避免除以 0
+        if total_customers == 0:
+            normalized_cost = total_cost
+        else:
+            normalized_cost = total_cost
+
+        return normalized_cost #不要normalize好像比較好
 
 
-    def calculate_reward(self, previous_position, new_position):
-        """
-        計算獎勵，根據移動距離給予懲罰或獎勵
-        - 距離短：獎勵較高
-        - 距離長：懲罰較高
-        """
-        distance = np.sqrt((previous_position[0] - new_position[0])**2 +
-                        (previous_position[1] - new_position[1])**2)
+    # # reward 只跟距離有關，越短越高
+    # def calculate_reward(self, previous_position, new_position): #_2 #_3
+    #     distance = np.linalg.norm(np.array(previous_position) - np.array(new_position))
+    #     reward = 1000 / (distance + 1)  # 更平滑
+    #     return reward
 
-        # 設定獎勵機制 (距離越短，獎勵越高)
-        reward = 10 * np.exp(-distance / 10000)  # 控制幅度
-        print(f"[DEBUG] 移動距離: {distance:.2f}, 獎勵: {reward:.2f}")
-        
-        return reward
 
     def update_state(self, state, actions):
         new_state = state.clone()
@@ -102,12 +129,12 @@ class Environment:
                 # ✅ 移動這段邏輯進來
                 if name.endswith("ＤＣ"):
                     if len(self.visited_customers) < len(self.df) - 1:
-                        print(f"[INFO] 🚛 車輛 {i} 想回倉庫，但仍有未配送的站點，繼續行駛")
+                        # print(f"[INFO] 🚛 車輛 {i} 想回倉庫，但仍有未配送的站點，繼續行駛")
                         continue
                     else:
-                        print(f"[INFO] 🚛 車輛 {i} 完成配送，正式回倉庫")
+                        # print(f"[INFO] 🚛 車輛 {i} 完成配送，正式回倉庫")
                         self.vehicles_completed.add(i)
-                        total_reward -= 50  # ❗ 太早回倉庫的懲罰
+                        total_reward -= 50  # 太早回倉庫的懲罰
 
             # 接下來原本 iterrows 那段就保留處理 state 更新...
 
@@ -125,8 +152,8 @@ class Environment:
                         new_state[0, i, 5] = self.current_time
 
                         new_position = np.array([action_x, action_y])
-                        reward = self.calculate_reward(previous_position, new_position)
-                        total_reward += reward
+                        # reward = self.calculate_reward(previous_position, new_position)
+                        # total_reward += reward
 
                         # 記錄路徑
                         routes[i].append((action_x, action_y))
@@ -155,7 +182,7 @@ class Environment:
 
         # **檢查是否回到起點**
         if np.isclose(x, self.start_x) and np.isclose(y, self.start_y):
-            print(f"[INFO] 🚛 車輛 {vehicle_id} 回到倉庫")
+            # print(f"[INFO] 🚛 車輛 {vehicle_id} 回到倉庫")
             self.vehicles_completed.add(vehicle_id)
 
         return self.current_time

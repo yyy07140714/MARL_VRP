@@ -79,3 +79,31 @@ def print_model_summary(encoder, strategy_module, decoder, input_size):
                                getattr(decoder, 'output_size', 
                                      input_size[-1]))
     summary(decoder, input_size=(decoder_input_size * 2,))
+
+
+def plot_training_curves(losses, rewards, save_path=None):
+    plt.figure(figsize=(12, 5))
+
+    # Loss curve
+    plt.subplot(1, 2, 1)
+    plt.plot(losses, label='Loss per Epoch', color='red')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss Curve')
+    plt.grid(True)
+
+    # Reward curve
+    plt.subplot(1, 2, 2)
+    plt.plot(rewards, label='Reward per Epoch', color='green')
+    plt.xlabel('Epoch')
+    plt.ylabel('Reward')
+    plt.title('Training Reward Curve')
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+        print(f"✅ 圖片已儲存至 {save_path}")
+    else:
+        plt.show()

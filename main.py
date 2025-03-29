@@ -4,7 +4,7 @@ import torch
 import train
 import predict
 import os
-from utils import visualize_routes
+from utils import visualize_routes, plot_training_curves
 from management import ManagementModule
 from environment import Environment
 from model import GRUEncoder, MultiAgentGRUDecoder
@@ -15,7 +15,7 @@ print(f"找到 {len(csv_files)} 個 CSV 檔案：{csv_files}")
 
 input_size = 6  
 batch_size = 16
-epochs = 100
+epochs = 150
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
@@ -28,7 +28,7 @@ for csv_path in csv_files:
     num_agents = df['N_V'].max()
     num_stations = len(df)
     hidden_size = num_agents * 16
-    output_size = num_stations
+    output_size = num_stations - 1
 
     # **將數據轉換為 Tensor**
     test_x = df[['X', 'Y', 'W_S', 'W_F', 'Demand', 'Service_time']].values.reshape(-1, num_stations, input_size)
@@ -38,14 +38,14 @@ for csv_path in csv_files:
     environment = Environment(df, num_agents)
 
     print(f"🚀 開始訓練 {csv_path}...")
-    train.train_model(
+    encoder, manager, decoder, losses, rewards = train.train_model(
         test_x, test_x, 
         input_size, hidden_size, num_heads=num_agents, 
         epochs=epochs, lr=0.01,
         save_path='save_models/',
         environment=environment
     )
-
+    plot_training_curves(losses, rewards, save_path="Output/training_curve.png")
     # **載入訓練好的模型**
     encoder, decoder = predict.load_models(input_size, hidden_size, output_size, num_agents)
 

@@ -6,8 +6,8 @@ import os
 from model import GRUEncoder, MultiAgentGRUDecoder
 
 def load_models(input_size, hidden_size, output_size, num_agents, model_path="save_models/"):
-    encoder = GRUEncoder(input_size, hidden_size, num_heads=num_agents)
-    decoder = MultiAgentGRUDecoder(hidden_size, output_size, num_agents)
+    encoder = GRUEncoder(input_size, hidden_size, num_heads=4)
+    decoder = MultiAgentGRUDecoder(hidden_size, num_agents)
 
     encoder.load_state_dict(torch.load(os.path.join(model_path, "encoder.pth")))
     decoder.load_state_dict(torch.load(os.path.join(model_path, "decoder.pth")))
@@ -20,6 +20,7 @@ def load_models(input_size, hidden_size, output_size, num_agents, model_path="sa
 
 
 def generate_routes(encoder, decoder, test_x, csv_path, output_dir="Output/"):
+    
     os.makedirs(output_dir, exist_ok=True)
 
     file_name = os.path.basename(csv_path)  
@@ -41,25 +42,36 @@ def generate_routes(encoder, decoder, test_x, csv_path, output_dir="Output/"):
     visited_stations = set()
     route_splits = [[df_original.iloc[0]] for _ in range(num_agents)]
 
-    while len(visited_stations) < len(df_original):
-        print(f"訪問站點數量: {len(visited_stations)}/{len(df_original)}")
+    while len(visited_stations) < len(df_original) -1 :
+        # print(f"訪問站點數量: {len(visited_stations)}/{len(df_original)}")
         # 預測配送路徑
+        device = next(encoder.parameters()).device
+        customer_positions = torch.tensor(df_original.iloc[1:][['X', 'Y']].values, dtype=torch.float32).to(device)
+        test_x = test_x.to(device)
         encoded = encoder(test_x)
         agent_inputs = encoded.unsqueeze(1).expand(-1, num_agents, -1)  # (batch_size, num_agents, hidden_size*2)
         current_num_agents = agent_inputs.shape[1]
-        predicted_routes = decoder(encoded, agent_inputs, current_num_agents).detach().cpu().numpy()
+        predicted_routes = decoder(encoded, agent_inputs, current_num_agents, customer_positions).detach().cpu().numpy()
 
-        mask = np.isin(np.arange(predicted_routes.shape[-1]), list(visited_stations))
+        mask_idx = [i - 1 for i in visited_stations if i != 0]  # 因為 decoder 對的是 df[1:]
+        mask = np.isin(np.arange(predicted_routes.shape[-1]), mask_idx)
         predicted_routes[:, :, mask] = -np.inf
 
         # 直接選擇機率最高的站點
         predicted_indices = np.argmax(predicted_routes, axis=-1).flatten()
         predicted_indices = np.clip(predicted_indices, 0, len(df_original) - 1)
 
+        any_new = False
         for agent_id, idx in enumerate(predicted_indices):
+            idx += 1
             if idx not in visited_stations:
                 route_splits[agent_id].append(df_original.iloc[idx])
                 visited_stations.add(idx)
+                any_new = True
+
+        if not any_new:
+            print("⚠️ 無法找到更多可拜訪的站點，提前結束。")
+            break
 
     # 在每條路徑最後加入起點
     for route in route_splits:
