@@ -88,10 +88,6 @@ def train_model_multi_instance(instances, input_size, hidden_size, max_agents, e
 
     epoch_losses, epoch_rewards = [], []
 
-    # ✅ Baseline 初始化
-    baseline = None
-    alpha = 0.9  # 控制 baseline 更新平滑度
-
     for epoch in range(epochs):
         total_loss, total_reward = 0, 0
         pbar = tqdm(instances, desc=f"Epoch {epoch+1}/{epochs}")
@@ -107,33 +103,21 @@ def train_model_multi_instance(instances, input_size, hidden_size, max_agents, e
 
             optimizer.zero_grad()
 
-            # ✅ 執行 episode 拿到 reward
+            # ❌ 不再用 baseline，直接用 state_loss
             state_loss, reward = management_module.run_episode(
                 initial_state=initial_state,
                 environment=env,
                 training=True
             )
 
-            # ✅ baseline 更新 + loss 計算
-            reward = reward.item()  # 轉 float
-            if baseline is None:
-                baseline = reward
-            else:
-                baseline = alpha * baseline + (1 - alpha) * reward
-
-            advantage = reward - baseline
-            loss = -advantage
-            loss_tensor = torch.tensor(loss, requires_grad=True).to(device)
-
-            loss_tensor.backward()
+            state_loss.backward()
             optimizer.step()
 
-            total_loss += loss
+            total_loss += state_loss.item()
             total_reward += reward
             pbar.set_postfix({
-                'Loss': f"{loss:.2e}",
-                'Reward': f"{reward:.2e}",
-                'Baseline': f"{baseline:.2e}"
+                'Loss': f"{state_loss.item():.2f}",
+                'Reward': f"{reward:.2f}"
             })
 
         avg_loss = total_loss / len(instances)
@@ -141,7 +125,7 @@ def train_model_multi_instance(instances, input_size, hidden_size, max_agents, e
         epoch_losses.append(avg_loss)
         epoch_rewards.append(avg_reward)
 
-        print(f"📈 Epoch {epoch+1}: Avg Loss = {avg_loss:.4f}, Avg Reward = {avg_reward:.4f}, Baseline = {baseline:.4f}")
+        print(f"📈 Epoch {epoch+1}: Avg Loss = {avg_loss:.4f}, Avg Reward = {avg_reward:.4f}")
         plot_training_curves(epoch_losses, epoch_rewards, save_path=f"Output/training_reward.png")
 
     os.makedirs(save_path, exist_ok=True)
@@ -150,5 +134,6 @@ def train_model_multi_instance(instances, input_size, hidden_size, max_agents, e
     print(f"✅ 模型已儲存到 {save_path}")
 
     return encoder, management_module, decoder, epoch_losses, epoch_rewards
+
 
 

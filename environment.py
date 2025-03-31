@@ -71,13 +71,14 @@ class Environment:
 
     def calculate_total_cost(self, routes, arrival_times, visited_indices, alpha=0.5, beta=2.0):
         """
-        計算總成本：包含路徑距離 + 時間窗違反懲罰（提早 / 遲到），並標準化（除以客戶數）
+        計算總成本：包含路徑距離 + 時間窗違反懲罰（提早 / 遲到）
         """
         total_cost = 0
         total_customers = 0  # 用來標準化
 
         for vehicle_id, route in enumerate(routes):
-            route_distance = self.calculate_route_length(route)
+            trimmed_route = route[1:-1] if len(route) > 2 else []
+            route_distance = self.calculate_route_length(trimmed_route)
             total_cost += route_distance
 
             visited_customers = [self.df.iloc[j] for j in visited_indices[vehicle_id]]
