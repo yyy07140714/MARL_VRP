@@ -6,17 +6,26 @@ import os
 from model import GRUEncoder, MultiAgentGRUDecoder
 
 def load_models(input_size, hidden_size, output_size, num_agents, model_path="save_models/"):
-    encoder = GRUEncoder(input_size, hidden_size, num_heads=4)
+    encoder = GRUEncoder(input_size, hidden_size, num_heads=num_agents)
     decoder = MultiAgentGRUDecoder(hidden_size, num_agents)
 
     encoder.load_state_dict(torch.load(os.path.join(model_path, "encoder.pth")))
-    decoder.load_state_dict(torch.load(os.path.join(model_path, "decoder.pth")))
+
+    # 🔁 處理 decoder 預測時 agent 數不一致：只載入公共部分權重
+    decoder_state_dict = torch.load(os.path.join(model_path, "decoder.pth"))
+    model_state_dict = decoder.state_dict()
+    
+    # 過濾掉 agent_embed 不匹配的部分
+    filtered_state_dict = {k: v for k, v in decoder_state_dict.items() if k in model_state_dict and v.shape == model_state_dict[k].shape}
+    model_state_dict.update(filtered_state_dict)
+    decoder.load_state_dict(model_state_dict)
 
     encoder.eval()
     decoder.eval()
     
-    print("模型加載完成！")
+    print("✅ 模型加載完成！（包含 decoder 動態嵌入）")
     return encoder, decoder
+
 
 
 def generate_routes(encoder, decoder, test_x, csv_path, output_dir="Output/"):

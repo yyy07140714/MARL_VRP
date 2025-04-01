@@ -18,17 +18,22 @@ class Environment:
 
     def cluster_customers(self):
         """
-        使用 KMeans 對顧客分群（不包含倉庫）
+        使用 KMeans 對顧客分群（排除所有名稱包含 'ＤＣ' 的站點）
         """
-        customer_df = self.df.iloc[1:]  # 排除 DC
+        # 過濾掉名稱含「ＤＣ」的列
+        customer_df = self.df[~self.df["Name"].str.contains("ＤＣ", na=False)].copy()
+
         coords = customer_df[["X", "Y"]].values
 
         kmeans = KMeans(n_clusters=self.num_vehicles, random_state=42)
         labels = kmeans.fit_predict(coords)
 
-        # 將 cluster_id 加回原始 df
-        self.df.loc[1:, "cluster_id"] = labels
-        self.df.loc[0, "cluster_id"] = -1  # DC 為 -1，不屬於任何群
+        # 初始化所有 cluster_id 為 -1（DC 或例外情況）
+        self.df["cluster_id"] = -1
+
+        # 將 label 設定回原始 df 中對應的 index
+        self.df.loc[customer_df.index, "cluster_id"] = labels
+
 
     def reset(self):
         self.visited_customers = set()  # 清空已訪問

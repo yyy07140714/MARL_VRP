@@ -20,10 +20,19 @@ class ManagementModule:
         routes = [[] for _ in range(environment.num_vehicles)]  # 記錄每輛車的路徑
         arrival_times = [[] for _ in range(environment.num_vehicles)]  # 記錄到達時間
 
-        store_progress = tqdm(total=len(environment.df), desc="📍 店家分配進度", unit="店", leave=False)
+        store_progress = tqdm(total=len(environment.df), desc='📍 店家分配進度', unit='店', leave=False)
+
+        MAX_STEPS = 200
+        step = 0
         
 
         while not environment.is_done(state):
+            step += 1
+            if step >= MAX_STEPS:
+                print(f"⚠️ [早終止] 超過最大步數 {MAX_STEPS}，強制退出 episode")
+                penalty_loss = torch.tensor(1e5, requires_grad=True).to(state.device)
+                penalty_reward = -1e5
+                return penalty_loss, penalty_reward            
             # print(f"[DEBUG] is_done: {environment.is_done(state)}, 已訪問: {len(environment.visited_customers)}/{len(environment.df)-1}")
             encoded_state = self.encoder(state)
             current_num_agents = len(environment.vehicle_positions)
@@ -39,36 +48,41 @@ class ManagementModule:
             )
 
             # agent_outputs = self.decoder(encoded_state, decoder_input, current_num_agents)
-
             valid_outputs = agent_outputs.clone()
+            for i, visited_idx in enumerate(environment.visited_customers):
+                valid_outputs[:, :, visited_idx] = float('-inf')
 
-            # Mask 已訪問的點
-            mask = torch.zeros_like(valid_outputs)
-            for visited_idx in environment.visited_customers:
-                valid_outputs[:, :, visited_idx] = 1
+            selected_indices = torch.argmax(valid_outputs, dim=-1).cpu().numpy()
 
-            valid_outputs = valid_outputs.masked_fill(mask.bool(), float('-inf'))
+            # valid_outputs = agent_outputs.clone()
 
-            # Fallback 修正：確保不是全為 -inf
-            for b in range(valid_outputs.shape[0]):
-                for a in range(valid_outputs.shape[1]):
-                    if torch.all(valid_outputs[b, a] == float('-inf')):
-                        valid_outputs[b, a] = torch.zeros_like(valid_outputs[b, a])  # 均勻初始化
-                        print(f"[WARN] Agent {a} fallback to uniform output at batch {b}")
+            # # Mask 已訪問的點
+            # mask = torch.zeros_like(valid_outputs)
+            # for visited_idx in environment.visited_customers:
+            #     valid_outputs[:, :, visited_idx] = 1
 
-            # 最後再選 max
-            if training:
-                # 使用 softmax sampling
-                probs = torch.softmax(valid_outputs, dim=-1)  # (1, num_agents, output_size)
-                selected_indices = []
+            # valid_outputs = valid_outputs.masked_fill(mask.bool(), float('-inf'))
 
-                for agent_probs in probs[0]:  # agent_probs: (output_size,)
-                    sampled = torch.multinomial(agent_probs, num_samples=1)
-                    selected_indices.append(sampled.item())
-                selected_indices = [selected_indices]  # 為了維持 shape (1, num_agents)
-            else:
-                # 測試或推論：argmax
-                selected_indices = torch.argmax(valid_outputs, dim=-1).cpu().numpy()
+            # # Fallback 修正：確保不是全為 -inf
+            # for b in range(valid_outputs.shape[0]):
+            #     for a in range(valid_outputs.shape[1]):
+            #         if torch.all(valid_outputs[b, a] == float('-inf')):
+            #             valid_outputs[b, a] = torch.zeros_like(valid_outputs[b, a])  # 均勻初始化
+            #             print(f"[WARN] Agent {a} fallback to uniform output at batch {b}")
+
+            # # 最後再選 max
+            # if training:
+            #     # 使用 softmax sampling
+            #     probs = torch.softmax(valid_outputs, dim=-1)  # (1, num_agents, output_size)
+            #     selected_indices = []
+
+            #     for agent_probs in probs[0]:  # agent_probs: (output_size,)
+            #         sampled = torch.multinomial(agent_probs, num_samples=1)
+            #         selected_indices.append(sampled.item())
+            #     selected_indices = [selected_indices]  # 為了維持 shape (1, num_agents)
+            # else:
+            #     # 測試或推論：argmax
+            #     selected_indices = torch.argmax(valid_outputs, dim=-1).cpu().numpy()
 
             new_positions = []
 
