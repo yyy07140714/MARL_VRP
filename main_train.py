@@ -11,7 +11,7 @@ from environment import Environment
 from model import GRUEncoder, MultiAgentGRUDecoder
 
 INPUT_SIZE = 6
-EPOCHS = 5
+EPOCHS = 800
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {DEVICE}")
 
@@ -45,17 +45,17 @@ if __name__ == "__main__":
     print(f"✅ 載入 {len(all_instances)} 筆訓練資料")
 
     MAX_AGENTS = max(env.num_vehicles for _, env in all_instances)
-    # encoder, management_module, decoder, losses, rewards = train.train_model_multi_instance(
-    #     instances=all_instances,
-    #     input_size=INPUT_SIZE,
-    #     hidden_size=MAX_AGENTS * 16,
-    #     max_agents=MAX_AGENTS,
-    #     epochs=EPOCHS,
-    #     lr=0.001,
-    #     save_path='save_models/'
-    # )
+    encoder, management_module, decoder, losses, rewards = train.train_model_multi_instance(
+        instances=all_instances,
+        input_size=INPUT_SIZE,
+        hidden_size=MAX_AGENTS * 16,
+        max_agents=MAX_AGENTS,
+        epochs=EPOCHS,
+        lr=0.001,
+        save_path='save_models/'
+    )
 
-    # plot_training_curves(losses, rewards, save_path="Output/training_curve_month.png")
+    plot_training_curves(losses, rewards, save_path="Output/training_curve_month.png")
 
     print("🚀 開始預測每筆資料...")
     for test_x, env in all_instances:

@@ -89,7 +89,7 @@ class Environment:
             visited_customers = [self.df.iloc[j] for j in visited_indices[vehicle_id]]
             visited_customers_dict = [cust.to_dict() for cust in visited_customers]
             arrival_time_list = arrival_times[vehicle_id]
-
+            
             penalty = self.calculate_time_window_penalty(
                 arrival_time_list, visited_customers_dict, alpha=alpha, beta=beta
             )
