@@ -122,29 +122,21 @@ class Environment:
         arrival_times = [[] for _ in range(self.num_vehicles)]
         visited_indices = [[] for _ in range(self.num_vehicles)]
 
+        lambda_jump = 0.5  # ✅ 懲罰強度，可自行調整
 
         for i, action in enumerate(actions):
             action_x, action_y = action[0], action[1]
-
             matched_row = self.df[(np.isclose(self.df["X"], action_x)) & (np.isclose(self.df["Y"], action_y))]
 
-            # ✅ 如果有匹配 row（確保非空）
             if not matched_row.empty:
                 name = matched_row.iloc[0]["Name"]
 
-                # ✅ 移動這段邏輯進來
                 if name.endswith("ＤＣ"):
                     if len(self.visited_customers) < len(self.df) - 1:
-                        # print(f"[INFO] 🚛 車輛 {i} 想回倉庫，但仍有未配送的站點，繼續行駛")
                         continue
                     else:
-                        # print(f"[INFO] 🚛 車輛 {i} 完成配送，正式回倉庫")
                         self.vehicles_completed.add(i)
-                        total_reward -= 50  # 太早回倉庫的懲罰
-
-            # 接下來原本 iterrows 那段就保留處理 state 更新...
-
-
+                        total_reward -= 50
 
             for j, row in self.df.iterrows():
                 if np.isclose(row["X"], action_x) and np.isclose(row["Y"], action_y):
@@ -158,17 +150,18 @@ class Environment:
                         new_state[0, i, 5] = self.current_time
 
                         new_position = np.array([action_x, action_y])
-                        # reward = self.calculate_reward(previous_position, new_position)
-                        # total_reward += reward
 
-                        # 記錄路徑
+                        # ✅ 跳躍懲罰 reward
+                        jump_penalty = lambda_jump * np.linalg.norm(previous_position - new_position)
+                        total_reward -= jump_penalty
+
                         routes[i].append((action_x, action_y))
                         arrival_times[i].append(self.get_arrival_time(action, i))
                     break
 
         total_cost = self.calculate_total_cost(routes, arrival_times, visited_indices)
-        # print(f"[DEBUG] 已訪問站點數: {len(self.visited_customers)}/{len(self.df)-1}, 總獎勵: {total_reward:.2f}, 總成本: {total_cost:.2f}")
         return new_state, total_reward - total_cost, visited_indices
+
 
 
     def get_arrival_time(self, action, vehicle_id):

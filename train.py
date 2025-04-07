@@ -10,6 +10,7 @@ import numpy as np
 import gc
 import random
 from utils import plot_training_curves
+import re
 
 def train_model(train_x, train_y, input_size, hidden_size, num_heads, epochs=10, lr=0.001, save_path="save_models/", environment=None):
     if environment is None:
@@ -76,19 +77,47 @@ def train_model(train_x, train_y, input_size, hidden_size, num_heads, epochs=10,
     return encoder, management_module, decoder, epoch_losses, epoch_rewards
 
 
-def train_model_multi_instance(instances, input_size, hidden_size, max_agents, epochs=10, lr=0.001, save_path="save_models/"):
+def get_latest_epoch(save_path):
+    """從模型儲存目錄中找出最後一個 epoch 數"""
+    pattern = re.compile(r'encoder_epoch(\d+)\.pth')
+    epochs = []
 
+    for fname in os.listdir(save_path):
+        match = pattern.match(fname)
+        if match:
+            epochs.append(int(match.group(1)))
+
+    return max(epochs) if epochs else 0
+
+
+def train_model_multi_instance(instances, input_size, hidden_size, max_agents, epochs=10, lr=0.001, save_path="save_models/"):
+    os.makedirs(save_path, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    resume_epoch = get_latest_epoch(save_path)
+    if resume_epoch >= epochs:
+        print(f"⚠️ 當前 resume_epoch={resume_epoch} 已達設定 epochs={epochs}，無需再訓練。")
+        return None, None, None, [], []
 
     encoder = GRUEncoder(input_size, hidden_size, num_heads=max_agents).to(device)
     decoder = MultiAgentGRUDecoder(hidden_size, num_agents=max_agents).to(device)
 
+    best_reward = float('-inf') 
+
+    if resume_epoch > 0:
+        encoder_path = os.path.join(save_path, f"encoder_epoch{resume_epoch}.pth")
+        decoder_path = os.path.join(save_path, f"decoder_epoch{resume_epoch}.pth")
+        encoder.load_state_dict(torch.load(encoder_path))
+        decoder.load_state_dict(torch.load(decoder_path))
+        print(f"🔄 自動從 epoch {resume_epoch} 繼續訓練")
+
     optimizer = optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=lr)
     criterion = nn.MSELoss()
-
     epoch_losses, epoch_rewards = [], []
+    final_epoch = resume_epoch
 
-    for epoch in range(epochs):
+    for epoch in range(resume_epoch, epochs):
+        final_epoch = epoch
         total_loss, total_reward = 0, 0
         pbar = tqdm(instances, desc=f"Epoch {epoch+1}/{epochs}")
 
@@ -96,29 +125,18 @@ def train_model_multi_instance(instances, input_size, hidden_size, max_agents, e
             env.reset()
             management_module = ManagementModule(encoder, decoder, optimizer, criterion, env)
 
-            current_num_agents = env.num_vehicles
             initial_state = torch.tensor([
-                [env.start_x, env.start_y, 0, 86400, 0, 0] for _ in range(current_num_agents)
+                [env.start_x, env.start_y, 0, 86400, 0, 0] for _ in range(env.num_vehicles)
             ], dtype=torch.float32).unsqueeze(0).to(train_x.device)
 
             optimizer.zero_grad()
-
-            # ❌ 不再用 baseline，直接用 state_loss
-            state_loss, reward = management_module.run_episode(
-                initial_state=initial_state,
-                environment=env,
-                training=True
-            )
-
+            state_loss, reward = management_module.run_episode(initial_state, env, training=True)
             state_loss.backward()
             optimizer.step()
 
             total_loss += state_loss.item()
             total_reward += reward
-            pbar.set_postfix({
-                'Loss': f"{state_loss.item():.2f}",
-                'Reward': f"{reward:.2f}"
-            })
+            pbar.set_postfix({'Loss': f"{state_loss.item():.2f}", 'Reward': f"{reward:.2f}"})
 
         avg_loss = total_loss / len(instances)
         avg_reward = total_reward / len(instances)
@@ -128,12 +146,24 @@ def train_model_multi_instance(instances, input_size, hidden_size, max_agents, e
         print(f"📈 Epoch {epoch+1}: Avg Loss = {avg_loss:.4f}, Avg Reward = {avg_reward:.4f}")
         plot_training_curves(epoch_losses, epoch_rewards, save_path=f"Output/training_reward.png")
 
-    os.makedirs(save_path, exist_ok=True)
-    torch.save(encoder.state_dict(), os.path.join(save_path, "encoder.pth"))
-    torch.save(decoder.state_dict(), os.path.join(save_path, "decoder.pth"))
-    print(f"✅ 模型已儲存到 {save_path}")
+        # ✅ 刪除上一個 epoch 的模型檔案
+        if epoch > 0:
+            prev_e = epoch
+            try:
+                os.remove(os.path.join(save_path, f"encoder_epoch{prev_e}.pth"))
+                os.remove(os.path.join(save_path, f"decoder_epoch{prev_e}.pth"))
+            except FileNotFoundError:
+                pass
 
+        if avg_reward > best_reward:
+            best_reward = avg_reward
+            torch.save(encoder.state_dict(), os.path.join(save_path, f"best_encoder.pth"))
+            torch.save(decoder.state_dict(), os.path.join(save_path, f"best_decoder.pth"))
+            print(f"🌟 儲存最佳模型（Epoch {epoch+1}, Reward: {avg_reward:.2f}）")
+
+        # ✅ 儲存目前 epoch 模型
+        torch.save(encoder.state_dict(), os.path.join(save_path, f"encoder_epoch{epoch+1}.pth"))
+        torch.save(decoder.state_dict(), os.path.join(save_path, f"decoder_epoch{epoch+1}.pth"))
+
+    print(f"✅ 模型訓練完成並儲存最新 epoch={final_epoch+1} 至 {save_path}")
     return encoder, management_module, decoder, epoch_losses, epoch_rewards
-
-
-

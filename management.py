@@ -106,7 +106,8 @@ class ManagementModule:
 
         # **計算最終總成本**
         total_cost = environment.calculate_total_cost(routes, arrival_times, visited_indices)
-        final_reward = (- total_cost)  # reward 是負 cost（最小化成本）
+        bonus = 10 * len(environment.visited_customers)
+        final_reward = -total_cost + bonus
         state_loss = torch.tensor(-final_reward, requires_grad=True).to(state.device)  # 當作 loss 使用
 
         # tqdm.write(f"[INFO] 總成本: {total_cost:.2f}, 最終獎勵: {final_reward:.2f}")

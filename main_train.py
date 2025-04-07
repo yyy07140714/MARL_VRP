@@ -11,7 +11,7 @@ from environment import Environment
 from model import GRUEncoder, MultiAgentGRUDecoder
 
 INPUT_SIZE = 6
-EPOCHS = 800
+EPOCHS = 10
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {DEVICE}")
 
@@ -32,7 +32,8 @@ def load_all_instances(folder_path):
             test_x = torch.tensor(test_x, dtype=torch.float32).to(DEVICE)
 
             env = Environment(df_day, num_agents)
-            env.df_path = f"temp_{date}.csv"
+            os.makedirs("temp", exist_ok=True)
+            env.df_path = f"temp/temp_{date}.csv"
             df_day.to_csv(env.df_path, index=False)
 
             instances.append((test_x, env))
@@ -55,7 +56,7 @@ if __name__ == "__main__":
         save_path='save_models/'
     )
 
-    plot_training_curves(losses, rewards, save_path="Output/training_curve_month.png")
+    # plot_training_curves(losses, rewards, save_path="Output/training_curve_month.png")
 
     print("🚀 開始預測每筆資料...")
     for test_x, env in all_instances:
@@ -68,7 +69,8 @@ if __name__ == "__main__":
             input_size=INPUT_SIZE,
             hidden_size=MAX_AGENTS * 16,
             output_size=output_size,
-            num_agents=num_agents
+            num_agents=num_agents,
+            best=True
         )
 
         csv_paths, output_folder = predict.generate_routes(encoder, decoder, test_x, env.df_path)

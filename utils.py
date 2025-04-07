@@ -1,8 +1,8 @@
 #utils.py
-import matplotlib.pyplot as plt
-import pandas as pd
 import os
-from torchsummary import summary
+import math
+import pandas as pd
+import matplotlib.pyplot as plt
 
 
 # 視覺化站點及座標
@@ -25,45 +25,99 @@ def plot_vrp(df):
     plt.legend()
     plt.show()
 
-
 def visualize_routes(csv_paths, save_dir, date_str):
-
     plt.figure(figsize=(12, 8))
     total_distance = 0  # 初始化總距離
 
-    colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']  # 預設顏色列表
+    colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
     num_colors = len(colors)
 
     for i, csv_path in enumerate(csv_paths):
         df = pd.read_csv(csv_path)
 
-        # 檢查是否包含 `X`, `Y`, `Distance` 欄位
+        # 檢查是否包含 `X`, `Y` 欄位
         if 'X' not in df.columns or 'Y' not in df.columns:
             print(f"⚠️ [警告] CSV 檔案 {csv_path} 缺少 'X' 或 'Y' 欄位，跳過。")
             continue
 
-        # 計算總距離
-        if 'Distance' in df.columns:
-            total_distance += df['Distance'].sum()
+        # 扣掉回原點的點（最後一筆）
+        df_trimmed = df.iloc[:-1] if len(df) > 1 else df
+        x = df_trimmed['X'].values
+        y = df_trimmed['Y'].values
 
-        # 繪製該車輛的路徑
-        plt.plot(df['X'], df['Y'], marker='o', linestyle='-', 
-                 color=colors[i % num_colors], label=f'Vehicle {i+1} ({csv_path})')
+        # 計算單一路徑距離
+        route_distance = 0.0
+        for j in range(1, len(x)):
+            dx = x[j] - x[j - 1]
+            dy = y[j] - y[j - 1]
+            dist = math.hypot(dx, dy)
+            route_distance += dist
 
-    # 設定標題與標籤
-    plt.title(f"Vehicle Routes Visualization (Total Distance: {total_distance:.2f})")
+        total_distance += route_distance
+
+        # 繪製路徑
+        plt.plot(x, y, marker='o', linestyle='-',
+                 color=colors[i % num_colors], label=f'Vehicle {i+1}')
+
+        # 在中點附近標出該路線距離
+        if len(x) >= 2:
+            mid_idx = len(x) // 2
+            # plt.text(x[mid_idx], y[mid_idx], f'{route_distance:.1f}m',
+            #          fontsize=9, color=colors[i % num_colors])
+
+    # 圖表設定與儲存
+    plt.title(f"Vehicle Routes Visualization (Total Distance: {total_distance:.1f}m)")
     plt.xlabel("X")
     plt.ylabel("Y")
     plt.legend(loc='best', fontsize='small')
     plt.grid(True)
     plt.show()
 
-    # 儲存圖片
     os.makedirs(save_dir, exist_ok=True)
     image_path = os.path.join(save_dir, f"routes_{date_str}.png")
     plt.savefig(image_path)
     plt.close()
     print(f"✅ 配送路徑圖已儲存至 {image_path}")
+
+
+# def visualize_routes(csv_paths, save_dir, date_str):
+
+#     plt.figure(figsize=(12, 8))
+#     total_distance = 0  # 初始化總距離
+
+#     colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']  # 預設顏色列表
+#     num_colors = len(colors)
+
+#     for i, csv_path in enumerate(csv_paths):
+#         df = pd.read_csv(csv_path)
+
+#         # 檢查是否包含 `X`, `Y`, `Distance` 欄位
+#         if 'X' not in df.columns or 'Y' not in df.columns:
+#             print(f"⚠️ [警告] CSV 檔案 {csv_path} 缺少 'X' 或 'Y' 欄位，跳過。")
+#             continue
+
+#         # 計算總距離
+#         if 'Distance' in df.columns:
+#             total_distance += df['Distance'].sum()
+
+#         # 繪製該車輛的路徑
+#         plt.plot(df['X'], df['Y'], marker='o', linestyle='-', 
+#                  color=colors[i % num_colors], label=f'Vehicle {i+1} ({csv_path})')
+
+#     # 設定標題與標籤
+#     plt.title(f"Vehicle Routes Visualization (Total Distance: {total_distance:.2f})")
+#     plt.xlabel("X")
+#     plt.ylabel("Y")
+#     plt.legend(loc='best', fontsize='small')
+#     plt.grid(True)
+#     plt.show()
+
+#     # 儲存圖片
+#     os.makedirs(save_dir, exist_ok=True)
+#     image_path = os.path.join(save_dir, f"routes_{date_str}.png")
+#     plt.savefig(image_path)
+#     plt.close()
+#     print(f"✅ 配送路徑圖已儲存至 {image_path}")
 
 
 def print_model_summary(encoder, strategy_module, decoder, input_size):
