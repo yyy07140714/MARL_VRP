@@ -11,7 +11,7 @@ from environment import Environment
 from model import GRUEncoder, MultiAgentGRUDecoder
 
 INPUT_SIZE = 6
-EPOCHS = 10
+EPOCHS = 100
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {DEVICE}")
 
